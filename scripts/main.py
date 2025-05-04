@@ -1,7 +1,11 @@
 import tkinter as tk
+import tkinter.ttk as ttk
 from tkinter import font as tkf
 import tkinter.filedialog as tkfd
 import modManager
+import os
+
+os.chdir(os.path.abspath(os.path.dirname(__file__)))
 
 manager = modManager.Manager()
 
@@ -25,37 +29,44 @@ class MainPanel(tk.Frame):
         self.actionsBar = ModActionsBar(self)
         self.actionsBar.grid(row=1,column=1,sticky="ew",padx=5,pady=(0,10))
 
-        parent.bind("<<RefreshModList>>",self.refresh)
-        parent.bind("<<CloseGame>>",self.closeGame)
-
     def directoryLoaded(self):
-        self.actionsBar.setEnabled(True)
+        self.actionsBar.setBarEnabled(True)
 
     def closeGame(self):
         self.detailsPanel.grid_forget()
-        self.actionsBar.setEnabled(False)
+        self.actionsBar.setBarEnabled(False)
         
     def refresh(self):
-        modNames = manager.getModList()
-        self.setItems(modNames)
+
+        self.modDetails = manager.getModDetails()
+        
+        self.ListBox.delete(0,tk.END)
+        self.ListBox.insert(tk.END,*[item["name"] for item in self.modDetails])
+        
         self.ListBox.select_set(0)
         self.ListBox.event_generate("<<ListboxSelect>>")
 
     def modSelected(self,event):
-        selectedMod = self.getSelectedModId()
+        selectedMod = self.getSelectedModDetails()
         if not selectedMod: return
         self.detailsPanel.grid(row=0,column=1, sticky="nesw",padx=10,pady=10)
         self.detailsPanel.setData(selectedMod)
-        self.actionsBar.setModId(selectedMod)
+        self.actionsBar.setSelectedMod(selectedMod)
 
-    def getSelectedModId(self):
-        selectedModIndex = self.ListBox.curselection()
-        if not selectedModIndex: return
-        return self.ListBox.get(selectedModIndex)
+    def modEnabledToggled(self,enabled):
+        if enabled:
+            self.detailsPanel.title.configure(fg="#000000")
+        else:
+            self.detailsPanel.title.configure(fg="#aaaaaa")
+
+    def getSelectedModDetails(self):
+        selectedModIndex = next(iter(self.ListBox.curselection()),None)
+        if selectedModIndex == None: return
+        return self.modDetails[selectedModIndex]
         
     def setItems(self,items):
-        self.ListBox.delete(0,tk.END)
-        self.ListBox.insert(tk.END,*items)
+        pass
+        
 
 class ModDetailsPanel(tk.Frame):
 
@@ -77,20 +88,32 @@ class ModDetailsPanel(tk.Frame):
         self.title = tk.Label(self.titleBar,text="hello",font=("TkTextFont",20), anchor="w")
         self.title.grid(row=0,column=0,sticky="w")
 
-        self.modIcon = tk.PhotoImage(file="assets/placeholder.png")
+        self.titleSeparator = ttk.Separator(self,orient="horizontal")
+        self.titleSeparator.grid(row=1,column=0,sticky="ew",pady=(15,10))
+
+        self.modIcon = tk.PhotoImage()
         
         self.img = tk.Label(self.titleBar,image=self.modIcon,bd=3,relief="sunken")
         self.img.grid(row=0,column=1,sticky="e")
 
-        self.desc = tk.Label(self,text="description lol",anchor="nw")
-        self.desc.grid(row=1,column=0,sticky="ew")
+        self.desc = tk.Message(self,text="description lol",anchor="nw",justify="left")
+        self.desc.bind("<Configure>", lambda e: self.desc.config(width=e.width))
+        self.desc.grid(row=2,column=0,sticky="nesw")
 
-        
-    def setData(self,modId):
-        if modId == self.currentModId: return
-        self.currentModId = modId
-        self.title.configure(text=modId)
-        #self.desc.configure(text=kwargs["Description"])
+    def setData(self,modDetails):
+        self.currentModId = modDetails["id"]
+        self.title.configure(text=modDetails["name"])
+        self.desc.configure (text=modDetails["desc"])
+        if modDetails["img"] == "":
+            self.modIcon = tk.PhotoImage(file="../assets/placeholder.png")
+        else:
+            self.modIcon = tk.PhotoImage(data=modDetails["img"])
+        self.img.configure(image=self.modIcon)
+
+        if manager.getModEnabled(modDetails["id"]):
+            self.title.configure(fg="#000000")
+        else:
+            self.title.configure(fg="#aaaaaa")
 
     def refresh():
         return self.parent.refresh()
@@ -177,28 +200,40 @@ class ModActionsBar(tk.Frame):
         super().__init__(parent)
         self.parent=parent
 
-        self.modId = ""
+        self.modDetails = None
         
         self.deleteButton = tk.Button(self,text="Delete",width=10,command=self.deleteClicked)
         self.deleteButton.grid(row=0,column=0,padx=5,sticky="w")
 
-        self.editButton = tk.Button(self,text="Edit",width=10)
-        self.editButton.grid(row=0,column=1,padx=5,sticky="w")
+        self.toggleEnabledButton = tk.Button(self,text="Disable",width=10,command=self.toggleModEnabled)
+        self.toggleEnabledButton.grid(row=0,column=1,padx=5,sticky="w")
 
-        self.setEnabled(False)
+        self.setBarEnabled(False)
 
-    def setModId(self,modId):
-        self.modId = modId
+        self.modEnabled = None
+
+    def setSelectedMod(self,modDetails):
+        self.modDetails = modDetails
+        self.modEnabled = manager.getModEnabled(self.modDetails.get("id"))
+        self.toggleEnabledButton.config(text=self.modEnabled and "Disable" or "Enable")
+            
 
     def deleteClicked(self):
-        if tk.messagebox.askokcancel(title="PC2 Mod Manager",message=f"Are you sure you want to delete {self.modId}?"):
-            manager.uninstallMod(self.modId)
+        if tk.messagebox.askokcancel(title="PC2 Mod Manager",message=f"Are you sure you want to delete {self.modDetails['name']}?"):
+            manager.uninstallMod(self.modDetails["id"])
             self.parent.refresh()
+    
+    def toggleModEnabled(self):
+        print(not self.modEnabled)
+        manager.setModEnabled(self.modDetails["id"],not self.modEnabled)
+        self.modEnabled = not self.modEnabled
+        self.toggleEnabledButton.config(text=self.modEnabled and "Disable" or "Enable")
+        self.parent.modEnabledToggled(self.modEnabled)
 
-    def setEnabled(self,enabled):
+    def setBarEnabled(self,enabled):
         state = enabled and "normal" or "disabled"
         self.deleteButton.config(state=state)
-        self.editButton.config(state=state)
+        self.toggleEnabledButton.config(state=state)
 
 
 class App(tk.Tk):
